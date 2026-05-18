@@ -1,6 +1,7 @@
 # preprocessing.py
 
 import json
+from pprint import pprint
 import torch
 import tqdm
 from torch_geometric.data import HeteroData
@@ -123,6 +124,11 @@ def create_graph_tensors(graph_dir, pt_dir, vocab, kernel_subset=None, max_archi
 
         data = HeteroData()
 
+        # Global node indices must be turned into typed node indices
+        inst_map = {}
+        var_map = {}
+        const_map = {}
+
         # Build a simple numeric feature per typed node: [text (fixed-size vocab)]
         features = {
             "instruction": [],
@@ -135,14 +141,21 @@ def create_graph_tensors(graph_dir, pt_dir, vocab, kernel_subset=None, max_archi
             # block = _safe_int(n.get('block', -1))
             # function = _safe_int(n.get('function', -1))
             node_type = _safe_int(n.get('type', -1))
+            node_id = _safe_int(n.get('id', -1))
+            if node_type not in [-1, 0, 1, 2]:
+                raise ValueError(f"Invalid node type: {node_type} or id: {node_id} in node {n}")
+            
             t = n.get('text', '')
             text_idx = int(vocab.get(t, -1) + 1) # offset by 1 to reserve 0 for unknown tokens
             if node_type == 0:
                 features["instruction"].append([text_idx])
+                inst_map[node_id] = len(inst_map)
             elif node_type == 1:
                 features["variable"].append([text_idx])
+                var_map[node_id] = len(var_map)
             elif node_type == 2:
                 features["constant"].append([text_idx])
+                const_map[node_id] = len(const_map)
         for k, v in features.items():
             if v:
                 data[k].x = torch.tensor(v, dtype=torch.long)
@@ -152,49 +165,80 @@ def create_graph_tensors(graph_dir, pt_dir, vocab, kernel_subset=None, max_archi
         links = graph_data.get('links') or []
         edge_index = {
             "control": [],
-            "data_var": [],
-            "data_const": [],
+            "inst_data_var": [],
+            "var_data_inst": [],
+            "const_data_inst": [],
             "call": []
         }
         edge_attrs = {
-            "data_var": [],
-            "data_const": []
+            "control": [],
+            "var_data_inst": [],
+            "const_data_inst": [],
         }
         for l in links:
             flow = _safe_int(l.get('flow', -1))
             source = _safe_int(l.get('source', -1))
             target = _safe_int(l.get('target', -1))
+            #source, target = target, source # backwards in json?
+            if source== -1 or target == -1 or flow == -1:
+                raise ValueError("Invalid edge with missing source/target/flow")
+
             position = _safe_int(l.get('position', 0))
-            if flow == 0:
-                edge_index["control"].append([source, target])
-            elif flow == 1:
-                if nodes[source].get('type') == 1:  # variable
-                    edge_index["data_var"].append([source, target])
-                    edge_attrs["data_var"].append([position])
-                elif nodes[source].get('type') == 2:  # constant
-                    edge_index["data_const"].append([source, target])
-                    edge_attrs["data_const"].append([position])
-            elif flow == 2:
-                edge_index["call"].append([source, target])
+            if flow == 0: # instruction -> control -> instruction
+                local_idx_source = inst_map.get(source)
+                local_idx_target = inst_map.get(target)
+                edge_index["control"].append([local_idx_source, local_idx_target])
+                edge_attrs["control"].append([position])
+            elif flow == 1: # data edges
+                if nodes[source].get('type') == 0:  # instruction -> data -> variable
+                    local_idx_source = inst_map.get(source)
+                    local_idx_target = var_map.get(target)
+                    edge_index["inst_data_var"].append([local_idx_source, local_idx_target])
+                elif nodes[source].get('type') == 1:  # variable -> data -> instruction
+                    local_idx_source = var_map.get(source)
+                    local_idx_target = inst_map.get(target)
+                    edge_index["var_data_inst"].append([local_idx_source, local_idx_target])
+                    edge_attrs["var_data_inst"].append([position])
+                elif nodes[source].get('type') == 2:  # constant -> data -> instruction
+                    local_idx_source = const_map.get(source)
+                    local_idx_target = inst_map.get(target)
+                    edge_index["const_data_inst"].append([local_idx_source, local_idx_target])
+                    edge_attrs["const_data_inst"].append([position])
+            elif flow == 2: # instruction -> call -> instruction
+                local_idx_source = inst_map.get(source)
+                local_idx_target = inst_map.get(target)
+                edge_index["call"].append([local_idx_source, local_idx_target])
+
+            if local_idx_source is None or local_idx_target is None:
+                print(f"{l=}")
+                print(f"{len(inst_map)=}, {len(var_map)=}, {len(const_map)=}")
+                print(inst_map, '\n', var_map, '\n', const_map)
+                print(f"{nodes[source]=}, {nodes[target]=}")
+                raise ValueError(f"Invalid edge indices: {local_idx_source=}, {local_idx_target=}, original source={source}, target={target}")
+                
 
         # Save edge tensors
         for k, v in edge_index.items():
             if v:
                 if k == "control":
                     data["instruction", "control", "instruction"].edge_index = torch.tensor(edge_index["control"], dtype=torch.long).t().contiguous()
-                elif k == "data_var":
-                    data["variable", "data", "instruction"].edge_index = torch.tensor(edge_index["data_var"], dtype=torch.long).t().contiguous()
-                elif k == "data_const":
-                    data["constant", "data", "instruction"].edge_index = torch.tensor(edge_index["data_const"], dtype=torch.long).t().contiguous()
+                elif k == "inst_data_var":
+                    data["instruction", "data", "variable"].edge_index = torch.tensor(edge_index["inst_data_var"], dtype=torch.long).t().contiguous()
+                elif k == "var_data_inst":
+                    data["variable", "data", "instruction"].edge_index = torch.tensor(edge_index["var_data_inst"], dtype=torch.long).t().contiguous()
+                elif k == "const_data_inst":
+                    data["constant", "data", "instruction"].edge_index = torch.tensor(edge_index["const_data_inst"], dtype=torch.long).t().contiguous()
                 elif k == "call":
                     data["instruction", "call", "instruction"].edge_index = torch.tensor(edge_index["call"], dtype=torch.long).t().contiguous()
 
         # Save edge attributes
         for attr_k, attr_v in edge_attrs.items():
             if attr_v:
-                if attr_k == "data_var":
+                if attr_k == "control":
+                    data["instruction", "control", "instruction"].edge_attr = torch.tensor(attr_v, dtype=torch.long)
+                elif attr_k == "var_data_inst":
                     data["variable", "data", "instruction"].edge_attr = torch.tensor(attr_v, dtype=torch.long)
-                elif attr_k == "data_const":
+                elif attr_k == "const_data_inst":
                     data["constant", "data", "instruction"].edge_attr = torch.tensor(attr_v, dtype=torch.long)
 
         # Save labels
