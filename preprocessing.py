@@ -145,15 +145,19 @@ def create_graph_tensors(graph_dir, pt_dir, vocab, kernel_subset=None, max_archi
             if node_type not in [-1, 0, 1, 2]:
                 raise ValueError(f"Invalid node type: {node_type} or id: {node_id} in node {n}")
             
-            t = n.get('text', '')
-            text_idx = int(vocab.get(t, -1) + 1) # offset by 1 to reserve 0 for unknown tokens
+            t = n.get('text', None)
+            if t is None:
+                raise ValueError(f"Missing text field in node {n}")
             if node_type == 0:
+                text_idx = int(vocab["instruction"].get(t, -1) + 1) # offset by 1 to reserve 0 for unknown tokens
                 features["instruction"].append([text_idx])
                 inst_map[node_id] = len(inst_map)
             elif node_type == 1:
+                text_idx = int(vocab["variable"].get(t, -1) + 1) # offset by 1 to reserve 0 for unknown tokens
                 features["variable"].append([text_idx])
                 var_map[node_id] = len(var_map)
             elif node_type == 2:
+                text_idx = int(vocab["constant"].get(t, -1) + 1) # offset by 1 to reserve 0 for unknown tokens
                 features["constant"].append([text_idx])
                 const_map[node_id] = len(const_map)
         for k, v in features.items():
