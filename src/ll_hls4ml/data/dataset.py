@@ -1,9 +1,9 @@
-# datasets.py
+"""PyG HeteroData dataset over preprocessed .pt files."""
 
-import os
-import torch
 from pathlib import Path
-from torch.utils.data import Dataset, DataLoader
+
+import torch
+from torch.utils.data import Dataset
 from torch_geometric.data import HeteroData
 
 
@@ -12,10 +12,11 @@ class HeteroGraphDataset(Dataset):
     Lazy-loading dataset for HeteroData .pt graphs.
     Indexes the filesystem at init time, loads graphs on demand.
     """
+
     def __init__(
         self,
         root: str | Path,
-        types: list[str] | None = None,    # e.g. ["exemplar", "conv2d"] — None = all
+        types: list[str] | None = None,
         transform=None,
     ):
         self.root = Path(root)
@@ -23,7 +24,6 @@ class HeteroGraphDataset(Dataset):
         self.paths = self._index(types)
 
     def _index(self, types: list[str] | None) -> list[Path]:
-        """Walk root, collect all .pt file paths. Fast — no loading."""
         paths = []
         root = self.root
 
@@ -55,5 +55,5 @@ class HeteroGraphDataset(Dataset):
         return data
 
     def type_of(self, idx: int) -> str:
-        """Returns the graph type (e.g. 'exemplar') for a given index."""
-        return self.paths[idx].parts[-3]  # root/type/archive_n/hash.pt
+        """Return kernel type (e.g. 'exemplar') for a given index."""
+        return self.paths[idx].parts[-3]

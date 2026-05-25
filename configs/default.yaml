@@ -1,0 +1,7 @@
+data_root: ../data
+graph_dir: ${data_root}/graphs
+tensor_dir: ${data_root}/tensors
+target_label: lut
+vocab_path: artifacts/vocab/default.json
+checkpoint_dir: artifacts/checkpoints
+exports_dir: artifacts/exports

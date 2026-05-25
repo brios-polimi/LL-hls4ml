@@ -1,0 +1,29 @@
+[project]
+name = "ll-hls4ml"
+version = "0.1.0"
+description = "Surrogate models for HLS resource/latency prediction from CDFG graphs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch",
+    "torch-geometric",
+    "numpy",
+    "pandas",
+    "networkx",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "tqdm",
+    "pyyaml",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = ["ipython", "jupyter"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
